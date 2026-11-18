@@ -1,4 +1,8 @@
 #include <Windows.h>
+#include <Aclapi.h>
+#include <Userenv.h>
+#pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Userenv.lib")
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -618,6 +622,44 @@ __declspec(noinline) BOOL InstallResource(BOOL bInstall, HMODULE hInstance, unzF
     if (bInstall && zipFile && pszFileNameInZip)
         unzCloseCurrentFile(zipFile);
     return bRet;
+}
+
+static BOOL GrantSearchHostReadAccess(LPCWSTR pwszDirectory)
+{
+    WCHAR wszPath[MAX_PATH];
+    wcscpy_s(wszPath, ARRAYSIZE(wszPath), pwszDirectory);
+    wcscat_s(wszPath, ARRAYSIZE(wszPath), L"\\ExplorerPatcher.amd64.dll");
+
+    PSID pSearchHostSid = NULL;
+    if (FAILED(DeriveAppContainerSidFromAppContainerName(L"MicrosoftWindows.Client.CBS_cw5n1h2txyewy", &pSearchHostSid)))
+    {
+        return FALSE;
+    }
+
+    PACL pOldDacl = NULL;
+    PACL pNewDacl = NULL;
+    PSECURITY_DESCRIPTOR pSecurityDescriptor = NULL;
+    DWORD dwStatus = GetNamedSecurityInfoW(wszPath, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+        NULL, NULL, &pOldDacl, NULL, &pSecurityDescriptor);
+    if (dwStatus == ERROR_SUCCESS)
+    {
+        EXPLICIT_ACCESSW access = { 0 };
+        access.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+        access.grfAccessMode = GRANT_ACCESS;
+        access.grfInheritance = NO_INHERITANCE;
+        BuildTrusteeWithSidW(&access.Trustee, pSearchHostSid);
+        dwStatus = SetEntriesInAclW(1, &access, pOldDacl, &pNewDacl);
+        if (dwStatus == ERROR_SUCCESS)
+        {
+            dwStatus = SetNamedSecurityInfoW(wszPath, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                NULL, NULL, pNewDacl, NULL);
+        }
+    }
+
+    if (pNewDacl) LocalFree(pNewDacl);
+    if (pSecurityDescriptor) LocalFree(pSecurityDescriptor);
+    FreeSid(pSearchHostSid);
+    return dwStatus == ERROR_SUCCESS;
 }
 
 const WCHAR* GetSystemLanguages()
@@ -1317,6 +1359,7 @@ int WINAPI wWinMain(
         if (CHECK_OK(bOk)) bOk = InstallResource(bInstall, hInstance, zipFile, PRODUCT_NAME ".IA-32.dll", wszPath, _T(PRODUCT_NAME) L".IA-32.dll");
 #if defined(_M_X64)
         if (CHECK_OK(bOk)) bOk = InstallResource(bInstall, hInstance, zipFile, PRODUCT_NAME ".amd64.dll", wszPath, _T(PRODUCT_NAME) L".amd64.dll");
+        if (CHECK_OK(bOk) && bInstall && IsWindows11()) bOk = GrantSearchHostReadAccess(wszPath);
 #elif defined(_M_ARM64)
         if (CHECK_OK(bOk)) bOk = InstallResource(bInstall, hInstance, zipFile, PRODUCT_NAME ".arm64.dll", wszPath, _T(PRODUCT_NAME) L".arm64.dll");
 #endif

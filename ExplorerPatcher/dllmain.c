@@ -209,6 +209,9 @@ BOOL g_bIsDesktopRaised = FALSE;
 #include "HideExplorerSearchBar.h"
 #include "ImmersiveFlyouts.h"
 #include "updates.h"
+#if WITH_MAIN_PATCHER
+HRESULT InjectSearchFromExplorer(void);
+#endif
 DWORD dwUpdatePolicy = UPDATE_POLICY_DEFAULT;
 wchar_t* EP_TASKBAR_LENGTH_PROP_NAME = L"EPTBLEN";
 
@@ -12029,15 +12032,20 @@ DWORD Inject(BOOL bIsExplorer)
 
 
 
-    /*if (bHookStartMenu)
+    if (dwStartShowClassicMode && IsWindows11())
     {
-        HookStartMenuParams* params2 = calloc(1, sizeof(HookStartMenuParams));
-        params2->dwTimeout = 1000;
-        params2->hModule = hModule;
-        params2->proc = InjectStartFromExplorer;
-        GetModuleFileNameW(hModule, params2->wszModulePath, MAX_PATH);
-        CreateThread(0, 0, HookStartMenu, params2, 0, 0);
-    }*/
+        HookStartMenuParams* searchParams = calloc(1, sizeof(HookStartMenuParams));
+        if (searchParams)
+        {
+            searchParams->dwTimeout = 1000;
+            searchParams->hModule = hModule;
+            searchParams->bSearchHost = TRUE;
+            searchParams->proc = InjectSearchFromExplorer;
+            GetModuleFileNameW(hModule, searchParams->wszModulePath, MAX_PATH);
+            if (!CreateThread(NULL, 0, HookStartMenu, searchParams, 0, NULL))
+                free(searchParams);
+        }
+    }
 
 
 
@@ -13871,6 +13879,7 @@ static HRESULT ExplorerInjection_InstallHooks()
 #define DLL_INJECTION_METHOD_CreateDXGIFactory1 1
 #define DLL_INJECTION_METHOD_COM 2
 #define DLL_INJECTION_METHOD_START_INJECTION 3
+#define DLL_INJECTION_METHOD_SEARCH_INJECTION 4
 HRESULT EntryPoint(DWORD dwMethod)
 {
     if (bInstanced)
@@ -13949,6 +13958,11 @@ HRESULT EntryPoint(DWORD dwMethod)
     wcscat_s(wszShellExpectedPath, MAX_PATH, L"\\SystemApps\\ShellExperienceHost_cw5n1h2txyewy\\ShellExperienceHost.exe");
     BOOL bIsThisShellEH = !_wcsicmp(exePath, wszShellExpectedPath);
 
+    TCHAR wszSearchHostExpectedPath[MAX_PATH];
+    GetWindowsDirectoryW(wszSearchHostExpectedPath, MAX_PATH);
+    wcscat_s(wszSearchHostExpectedPath, MAX_PATH, L"\\SystemApps\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\SearchHost.exe");
+    BOOL bIsThisSearchHost = !_wcsicmp(exePath, wszSearchHostExpectedPath);
+
     if (dwMethod == DLL_INJECTION_METHOD_DXGIDeclareAdapterRemovalSupport && !bIsThisExplorer)
     {
         return E_NOINTERFACE;
@@ -13962,6 +13976,10 @@ HRESULT EntryPoint(DWORD dwMethod)
         return E_NOINTERFACE;
     }
     if (dwMethod == DLL_INJECTION_METHOD_START_INJECTION && !bIsThisStartMEH)
+    {
+        return E_NOINTERFACE;
+    }
+    if (dwMethod == DLL_INJECTION_METHOD_SEARCH_INJECTION && !bIsThisSearchHost)
     {
         return E_NOINTERFACE;
     }
@@ -14007,6 +14025,19 @@ HRESULT EntryPoint(DWORD dwMethod)
 #endif
         IncrementDLLReferenceCount(hModule);
     }
+    else if (bIsThisSearchHost && dwMethod == DLL_INJECTION_METHOD_SEARCH_INJECTION)
+    {
+        bInstanced = TRUE;
+#if WITH_MAIN_PATCHER
+        StartMenu_LoadSettings(FALSE);
+        if (dwStartShowClassicMode && IsWindows11())
+        {
+            funchook = funchook_create();
+            PatchStartTileData(TRUE);
+        }
+#endif
+        IncrementDLLReferenceCount(hModule);
+    }
     else if (dwMethod == DLL_INJECTION_METHOD_COM)
     {
         bInstanced = TRUE;
@@ -14034,6 +14065,13 @@ __declspec(dllexport) HRESULT CreateDXGIFactory1(void* p1, void** p2)
 HRESULT InjectStartFromExplorer()
 {
     EntryPoint(DLL_INJECTION_METHOD_START_INJECTION);
+    return HRESULT_FROM_WIN32(GetLastError());
+}
+
+// Loaded into SearchHost by Explorer to apply the classic Start tile verbs.
+HRESULT InjectSearchFromExplorer()
+{
+    EntryPoint(DLL_INJECTION_METHOD_SEARCH_INJECTION);
     return HRESULT_FROM_WIN32(GetLastError());
 }
 #endif

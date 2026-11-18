@@ -203,6 +203,7 @@ typedef struct _HookStartMenuParams
 {
     HMODULE hModule;
     DWORD dwTimeout;
+    BOOL bSearchHost;
     wchar_t wszModulePath[MAX_PATH];
     FARPROC proc;
 } HookStartMenuParams;

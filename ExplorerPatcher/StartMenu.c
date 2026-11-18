@@ -235,7 +235,11 @@ DWORD WINAPI HookStartMenu(HookStartMenuParams* params)
 
     TCHAR wszKnownPath[MAX_PATH];
     GetWindowsDirectoryW(wszKnownPath, MAX_PATH);
-    wcscat_s(wszKnownPath, MAX_PATH, L"\\SystemApps\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\StartMenuExperienceHost.exe");
+    if (params->bSearchHost)
+        wcscat_s(wszKnownPath, MAX_PATH, L"\\SystemApps\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\SearchHost.exe");
+    else
+        wcscat_s(wszKnownPath, MAX_PATH, L"\\SystemApps\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\StartMenuExperienceHost.exe");
+    const wchar_t* targetName = params->bSearchHost ? L"SearchHost.exe" : L"StartMenuExperienceHost.exe";
 
     while (TRUE)
     {
@@ -256,7 +260,7 @@ DWORD WINAPI HookStartMenu(HookStartMenuParams* params)
             {
                 do
                 {
-                    if (!wcscmp(pe32.szExeFile, TEXT("StartMenuExperienceHost.exe")))
+                    if (!_wcsicmp(pe32.szExeFile, targetName))
                     {
                         hProcess = OpenProcess(
                             PROCESS_QUERY_LIMITED_INFORMATION |
